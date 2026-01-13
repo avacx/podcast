@@ -212,8 +212,7 @@ def main():
     parser = argparse.ArgumentParser(description="本地Faster-Whisper音频转录")
     parser.add_argument("files", nargs="+", help="音频文件路径")
     parser.add_argument("--model", default="base", 
-                       choices=["tiny", "base", "small", "medium", "large-v3"],
-                       help="Whisper模型大小 (默认: base)")
+                       help="Whisper模型大小或本地路径 (默认: base)")
     parser.add_argument("--language", help="指定语言代码 (如: zh, en)")
     parser.add_argument("--device", default="cpu", 
                        choices=["cpu", "cuda"], help="计算设备")
