@@ -1,303 +1,271 @@
 <div align="center">
   
-# 🎙️ AI Podcast Transcriber
+# 🎙️ Podcast Transcriber
 
-English | [中文](README_zh.md)
+[English](#english) | [中文](#中文)
 
-An open-source tool that turns podcasts into high-quality transcripts and AI-powered summaries.
-
-![Podcast Transcriber Interface](public/podcast_en.jpeg)
+将播客音频转录为文字的开源工具，支持本地 Whisper 转录，GPU 加速。
 
 </div>
 
-## 🌟 Project Overview
+---
 
-Podcast Transcriber is a full-stack web application designed to bridge the gap between audio content and text accessibility. It automatically processes podcast episodes from various platforms, and delivers accurate transcriptions with meaningful summaries in multiple languages.
+<a name="中文"></a>
+## 中文文档
 
-### Key Capabilities
+### 功能特点
 
-- **🔗 Multi-Platform Support**: Support for Apple Podcasts, Xiaoyuzhoufm, RSS feeds, and direct audio URLs
-- **🚀 Performance First**: Using OpenAI Faster-Whisper model for speech-to-text
-- **🤖 AI Optimization**: AI-optimized transcription and summary text based on podcast content characteristics
-- **📱 Responsive Design**: Modern mobile-first UI, friendly experience for both desktop and mobile
-- **🌍 Conditional Translation**: When the selected summary language differs from the detected transcript language, the system auto-translates with GPT‑4o
+- **🎤 本地转录**: 使用 Faster-Whisper 本地转录，无需依赖云服务
+- **🚀 GPU 加速**: 支持 NVIDIA GPU (CUDA)，4090 转录 1 小时音频仅需 2-3 分钟
+- **🔗 多平台支持**: 支持小宇宙、Apple Podcasts、RSS 订阅源、直接音频链接
+- **📱 响应式设计**: 支持桌面和移动端访问
+- **💾 一键下载**: 转录完成后可直接下载 Markdown 格式的文字稿
 
-## 🏗️ Architecture & Implementation
+### 性能对比
 
-### System Architecture
+| 设备 | 模型 | 10分钟音频 | 1小时音频 |
+|------|------|-----------|----------|
+| CPU (M2 Mac) | base | ~3-5分钟 | ~20-30分钟 |
+| 4090 GPU | base | ~5-10秒 | ~30-60秒 |
+| 4090 GPU | large-v3 | ~15-30秒 | ~2-3分钟 |
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Frontend      │    │    Backend       │    │  External APIs  │
-│                 │    │                  │    │                 │
-│ • HTML5/CSS3    │◄──►│ • Express.js     │◄──►│ • OpenAI GPT    │
-│ • Vanilla JS    │    │ • Node.js        │    │ • RSS Feeds     │
-│ • TailwindCSS   │    │ • File Download  │    │ • Podcast APIs  │
-│ • File Download │    │ • Text Saving    │    │                 │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │ Local Processing │
-                    │                  │
-                    │ • Faster-Whisper │
-                    │ • Python Script  │
-                    │ • Audio Direct   │
-                    │ • Text Export    │
-                    └──────────────────┘
-```
+---
 
-### Core Processing Pipeline
+### 快速开始 (本地 CPU 版)
 
-1. **Podcast Link Analysis**: Multi-strategy URL parsing for Apple Podcasts, Xiaoyuzhou, and RSS feeds
-2. **Audio Extraction**: Direct download with RSS feed discovery and API integration  
-3. **Local Transcription**: High-speed Faster-Whisper processing
-4. **Text Optimization**: AI-powered continuity enhancement and flow improvement
-5. **Summarization**: Structured content analysis and key point extraction
-6. **File Export**: Automatic saving of transcripts and summaries with download links
+#### 环境要求
 
-### Technology Stack
+- Node.js 18+
+- Python 3.8+
+- ffmpeg
 
-#### Frontend Architecture
-- **HTML5**: Semantic markup with accessibility features
-- **TailwindCSS**: Utility-first styling with custom design system
-- **Vanilla JavaScript**: Lightweight, dependency-free client-side logic
-- **Progressive Enhancement**: Graceful degradation for various devices
-
-#### Backend Infrastructure
-- **Node.js**: Asynchronous, event-driven server runtime
-- **Express.js**: Minimalist web framework with middleware support
-- **Python Integration**: Calls Faster-Whisper for local transcription
-- **File Management**: Audio download, processing, and result saving
-
-#### AI & ML Integration
-- **Faster-Whisper**: Local high-performance speech-to-text transcription
-- **GPT-4**: Advanced language model for podcast content summarization and text optimization
-- **Custom Prompting**: Specialized prompts optimized for podcasts, enhancing continuity and quality
-
-## 📁 Project Structure
-
-```
-podcast-to-text/
-├── 📂 public/                          # Frontend Application
-│   ├── 📄 index.html                   # Main application interface
-│   └── 📄 script.js                    # Client-side logic & UI interactions
-│
-├── 📂 server/                          # Backend Services
-│   ├── 📄 index.js                     # Express server & API routing
-│   ├── 📄 whisper_transcribe.py        # Local Faster-Whisper transcription
-│   ├── 📂 assets/                      # Test assets
-│   │   └── 📄 test_audio.mp3           # Sample audio for testing
-│   ├── 📂 services/                    # Core business logic
-│   │   ├── 📄 openaiService.js         # AI processing & optimization
-│   │   ├── 📄 podcastService.js        # Podcast extraction & parsing
-│   │   ├── 📄 audioInfoService.js        # Audio information retrieval
-│   │   └── 📄 rssParser.js             # RSS feed processing
-│   └── 📂 temp/                        # Temporary audio & text storage (auto-created)
-│
-├── 📄 package.json                     # Dependencies & scripts
-├── 📄 package-lock.json                # Dependency lock file
-├── 📄 .env                            # Environment configuration (create from .env.example)
-├── 📄 .gitignore                       # Git ignore rules
-├── 📄 README.md                        # English documentation
-├── 📄 README_zh.md                     # Chinese documentation
-├── 📄 PLATFORM_SUPPORT.md             # Platform compatibility guide
-├── 📄 start.sh                        # Production start script
-├── 📄 quick-start.sh                   # Quick setup script
-└── 📄 fix-cursor-terminal.md           # IDE troubleshooting guide
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Node.js 16+**: Runtime environment
-- **Python 3.8+**: For local Faster-Whisper transcription (virtual environment required)
-- **ffmpeg**: Audio processing library (usually pre-installed or available via package managers)
-- **OpenAI API Key**: For transcription text optimization and AI summarization
-
-### Installation
+#### 安装步骤
 
 ```bash
-# Clone the repository
-git clone <https://github.com/wendy7756/
-podcast-transcriber>
-cd podcast-transcriber
+# 克隆项目
+git clone https://github.com/avacx/podcast.git
+cd podcast
 
-# Install Node.js dependencies
+# 安装 Node.js 依赖
 npm install
 
-# Create Python virtual environment (recommended)
+# 创建 Python 虚拟环境
 python3 -m venv venv
-source venv/bin/activate  # Linux/macOS
-# or venv\Scripts\activate  # Windows
+source venv/bin/activate
 
-# Install Python dependencies (local transcription)
-pip install --upgrade pip
+# 安装 Faster-Whisper
 pip install faster-whisper
 
-# Configure environment
+# 配置环境变量
 cp .env.example .env
-# Edit .env file, add your OpenAI API key
 
-# Start the application
+# 启动服务
 npm start
-# or development mode (auto-reload)
-npm run dev
-
-# Access the application
-open http://localhost:3000
 ```
 
-### ⚠️ Important Notes
+访问 http://localhost:3000
 
-**Python Virtual Environment Setup**: The project requires a Python virtual environment named `venv` in the project root directory. This is essential because the Node.js server calls `./venv/bin/python` to execute transcription scripts.
+---
 
-If you encounter errors like `/bin/sh: .../venv/bin/python: No such file or directory`, please ensure:
+### GPU 服务器部署 (Ubuntu + NVIDIA GPU)
 
-1. Create the virtual environment in the project root: `python3 -m venv venv`
-2. Activate the virtual environment: `source venv/bin/activate`
-3. Install dependencies in the virtual environment: `pip install faster-whisper`
+推荐使用 NVIDIA GPU 服务器（如 4090）获得最佳性能。
 
-### Configuration
+#### 方法一：自动部署脚本
 
-Create a `.env` file with the following variables:
+```bash
+# 1. 上传项目到服务器
+scp -r podcast user@your-server:~/
 
+# 2. SSH 登录服务器
+ssh user@your-server
+
+# 3. 运行部署脚本
+cd ~/podcast
+chmod +x deploy/setup-gpu-server.sh
+./deploy/setup-gpu-server.sh
+```
+
+#### 方法二：手动部署
+
+```bash
+# 安装系统依赖
+sudo apt update
+sudo apt install -y curl git ffmpeg python3 python3-pip python3-venv nodejs npm
+
+# 确认 NVIDIA 驱动
+nvidia-smi
+
+# 克隆项目
+git clone https://github.com/avacx/podcast.git
+cd podcast
+
+# 安装依赖
+npm install
+python3 -m venv venv
+source venv/bin/activate
+pip install faster-whisper
+
+# 配置 GPU 环境变量
+cp deploy/.env.gpu.example .env
+
+# 启动服务
+npm start
+```
+
+#### 本地访问远程服务器
+
+部署完成后，在本地浏览器访问：
+```
+http://服务器IP:3000
+```
+
+确保防火墙开放 3000 端口：
+```bash
+sudo ufw allow 3000
+```
+
+---
+
+### 环境变量配置
+
+#### CPU 版本 (.env)
 ```env
-# OpenAI Configuration (for text optimization and summarization only)
-OPENAI_API_KEY=your_openai_api_key_here
-# Optional: custom OpenAI URL (compatible endpoint)
-
-# Local Whisper Configuration
+PORT=3000
 USE_LOCAL_WHISPER=true
 WHISPER_MODEL=base
-
-# Server Configuration
-PORT=3000
-
-# Optional: Audio processing configuration
-MAX_SEGMENT_SIZE_MB=25
-SEGMENT_DURATION_SECONDS=600
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
 ```
 
-## 🔧 Troubleshooting
+#### GPU 版本 (.env)
+```env
+PORT=3000
+HOST=0.0.0.0
+USE_LOCAL_WHISPER=true
+WHISPER_MODEL=large-v3
+WHISPER_DEVICE=cuda
+WHISPER_COMPUTE_TYPE=float16
+```
 
-### Common Issues
+#### 模型选择
 
-**Q: Getting `No such file or directory: .../venv/bin/python` error**
+| 模型 | 精度 | 速度 | 显存占用 |
+|------|------|------|---------|
+| tiny | 低 | 最快 | ~1GB |
+| base | 中 | 快 | ~1GB |
+| small | 中高 | 中等 | ~2GB |
+| medium | 高 | 较慢 | ~5GB |
+| large-v3 | 最高 | 慢 | ~10GB |
 
-A: This indicates that the Python virtual environment is not properly created. Follow these steps:
+4090 显卡推荐使用 `large-v3` 获得最佳转录质量。
+
+---
+
+### 项目结构
+
+```
+podcast/
+├── public/                 # 前端页面
+│   ├── index.html
+│   └── script.js
+├── server/                 # 后端服务
+│   ├── index.js           # Express 服务器
+│   ├── whisper_transcribe.py  # Whisper 转录脚本
+│   └── services/          # 业务逻辑
+├── deploy/                 # 部署相关
+│   ├── setup-gpu-server.sh    # GPU 服务器部署脚本
+│   ├── .env.gpu.example       # GPU 配置模板
+│   └── DEPLOY_GPU.md          # 详细部署文档
+├── .env.example            # 环境变量模板
+└── package.json
+```
+
+---
+
+### 常见问题
+
+**Q: 提示 `venv/bin/python: No such file or directory`**
+
+A: 需要创建 Python 虚拟环境：
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install faster-whisper
+```
+
+**Q: GPU 版本提示 CUDA 不可用**
+
+A: 检查 NVIDIA 驱动和 CUDA：
+```bash
+nvidia-smi
+python3 -c "import torch; print(torch.cuda.is_available())"
+```
+
+**Q: 首次转录很慢**
+
+A: 首次运行需要下载 Whisper 模型文件，后续会使用缓存。
+
+---
+
+### License
+
+Apache 2.0 License
+
+---
+
+<a name="english"></a>
+## English Documentation
+
+### Features
+
+- **🎤 Local Transcription**: Uses Faster-Whisper for local transcription, no cloud dependency
+- **🚀 GPU Acceleration**: Supports NVIDIA GPU (CUDA), 4090 transcribes 1-hour audio in 2-3 minutes
+- **🔗 Multi-Platform**: Supports Xiaoyuzhou, Apple Podcasts, RSS feeds, direct audio URLs
+- **📱 Responsive Design**: Works on desktop and mobile
+- **💾 One-Click Download**: Download transcripts in Markdown format
+
+### Quick Start (Local CPU)
 
 ```bash
-# Ensure you're in the project root directory
-cd /path/to/podcast-transcriber
-
-# Remove any existing incorrect virtual environment
-rm -rf venv
-
-# Create a new virtual environment
-python3 -m venv venv
-
-# Activate the virtual environment
-source venv/bin/activate
-
-# Verify Python path
-which python  # Should show .../venv/bin/python
+# Clone
+git clone https://github.com/avacx/podcast.git
+cd podcast
 
 # Install dependencies
-pip install --upgrade pip
-pip install faster-whisper
-
-# Restart the server
-npm start
-```
-
-**Q: Transcription function not responding or showing errors**
-
-A: Ensure that:
-1. Virtual environment is properly created and activated
-2. `faster-whisper` is installed in the virtual environment
-3. System has sufficient memory (recommend at least 4GB available)
-4. ffmpeg is installed (check with `which ffmpeg`)
-
-**Q: 500 Internal Server Error**
-
-In most cases, HTTP 500 is not a network issue but a local Python virtual environment problem (missing `venv` or dependencies). Heuristic: if the podcast link opens fine in your browser, it’s unlikely a network issue.
-
-Quick checklist:
-
-```bash
-# 1) Ensure you're at the project root
-cd /path/to/podcast-transcriber
-
-# 2) Recreate the virtual environment
-rm -rf venv
+npm install
 python3 -m venv venv
 source venv/bin/activate
-
-# 3) Install dependencies
-pip install --upgrade pip
 pip install faster-whisper
 
-# 4) Verify python path and ffmpeg
-which python     # should be .../podcast-transcriber/venv/bin/python
-which ffmpeg     # should point to a valid executable
+# Configure
+cp .env.example .env
 
-# 5) Restart the server
+# Start
 npm start
 ```
 
-If the problem persists, copy the terminal stack trace and open an issue with the logs attached.
+Visit http://localhost:3000
 
-**Q: First transcription is very slow**
+### GPU Server Deployment
 
-A: This is normal behavior. Faster-Whisper needs to download model files (~75MB) on first run. Subsequent transcriptions will be much faster.
+See [deploy/DEPLOY_GPU.md](deploy/DEPLOY_GPU.md) for detailed instructions.
 
-## 🔧 Advanced Features
+```bash
+# Quick deploy on Ubuntu + NVIDIA GPU
+chmod +x deploy/setup-gpu-server.sh
+./deploy/setup-gpu-server.sh
+```
 
-### AI Text Optimization
+### Environment Variables
 
-- **Continuity Enhancement**: Seamless connection between transcribed segments
-- **Language Preservation**: Maintains original speaker style and expression patterns
-- **Filler Word Cleanup**: Intelligent removal of excessive verbal fillers while preserving meaning
-- **Structured Summarization**: Hierarchical content organization with key point extraction
+```env
+# GPU Configuration
+WHISPER_MODEL=large-v3
+WHISPER_DEVICE=cuda
+WHISPER_COMPUTE_TYPE=float16
+```
 
-### Multi-Platform Support
+### License
 
-- **Apple Podcasts**: RSS feed discovery and iTunes API integration
-- **Xiaoyuzhoufm**: Native API support with fallback RSS parsing
-- **Generic RSS**: Universal podcast feed compatibility
-- **Direct Audio**: Support for MP3, M4A, WAV, AAC, and other formats
-
-### Audio Processing
-- **Support for Various Duration Podcasts**: Local Faster-Whisper model supports processing audio files of any size
-- **Memory Optimization**: Intelligent memory management, suitable for personal devices and workstations
-- **Audio Processing Time**: Depends on device performance, network environment, and selected Whisper model
-
-
-## 🌐 Use Cases
-
-### Personal Users
-- **Study Notes**: Convert educational podcasts to text for easy review
-- **Content Organization**: Create summary indexes for favorite podcasts
-- **Multi-language Learning**: Get transcriptions in different languages for practice
-
-### Professional Users
-- **Content Creation**: Use podcast transcriptions for blog and article creation
-- **Research Analysis**: Text analysis and citation of academic podcasts
-- **Accessibility Support**: Provide text versions for hearing-impaired users
-
-### Enterprise Applications
-- **Meeting Records**: Automatic transcription of corporate podcasts and recordings
-- **Content Marketing**: SEO optimization of podcast content in text format
-- **Knowledge Management**: Integrate audio content into enterprise knowledge bases
-
-
-## 📄 License
-
-Apache 2.0 License - see [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests.
-
+Apache 2.0 License

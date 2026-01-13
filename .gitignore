@@ -4,6 +4,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
 # 环境变量
 .env
 .env.local
@@ -33,3 +40,6 @@ Thumbs.db
 # 生产构建文件
 dist/
 build/
+
+# 测试文件
+test-*.js

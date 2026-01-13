@@ -1,10 +1,69 @@
 const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 
 const execAsync = promisify(exec);
+
+/**
+ * 使用 spawn 执行 Python 脚本并实时输出日志
+ */
+function execPythonWithProgress(pythonPath, scriptPath, args, options = {}) {
+    return new Promise((resolve, reject) => {
+        console.log(`🚀 启动 Python 进程: ${scriptPath}`);
+        
+        const proc = spawn(pythonPath, [scriptPath, ...args], {
+            cwd: options.cwd || process.cwd(),
+            env: process.env
+        });
+        
+        let stdout = '';
+        let stderr = '';
+        let lastLogTime = Date.now();
+        
+        // 实时输出 stderr (日志)
+        proc.stderr.on('data', (data) => {
+            const text = data.toString();
+            stderr += text;
+            
+            // 每 2 秒输出一次日志，避免刷屏
+            const now = Date.now();
+            if (now - lastLogTime > 2000) {
+                console.log(`[Whisper] ${text.trim()}`);
+                lastLogTime = now;
+            }
+        });
+        
+        // 收集 stdout (JSON 结果)
+        proc.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+        
+        // 进程结束
+        proc.on('close', (code) => {
+            if (code === 0) {
+                resolve({ stdout, stderr });
+            } else {
+                reject(new Error(`Python 进程退出，代码: ${code}\n${stderr}`));
+            }
+        });
+        
+        // 进程错误
+        proc.on('error', (err) => {
+            reject(new Error(`启动 Python 失败: ${err.message}`));
+        });
+        
+        // 超时处理
+        if (options.timeout) {
+            setTimeout(() => {
+                proc.kill('SIGTERM');
+                reject(new Error('Python 脚本执行超时'));
+            }, options.timeout);
+        }
+    });
+}
+
 
 /**
  * 生成标准化的文件名
@@ -66,7 +125,21 @@ ${summary}${sourceSection}
 
 // 本地Whisper转录配置
 const WHISPER_MODEL = process.env.WHISPER_MODEL || 'base'; // Whisper模型大小
+const WHISPER_DEVICE = process.env.WHISPER_DEVICE || 'cpu'; // 设备: cpu 或 cuda
+const WHISPER_COMPUTE_TYPE = process.env.WHISPER_COMPUTE_TYPE || (WHISPER_DEVICE === 'cuda' ? 'float16' : 'int8'); // 计算精度
+
 console.log(`🎤 转录模式: 本地Faster-Whisper`);
+console.log(`   - 模型: ${WHISPER_MODEL}`);
+console.log(`   - 设备: ${WHISPER_DEVICE}`);
+console.log(`   - 精度: ${WHISPER_COMPUTE_TYPE}`);
+
+// OpenAI模型配置 (当前已禁用)
+const OPENAI_MODEL_OPTIMIZATION = process.env.OPENAI_MODEL_OPTIMIZATION || 'gpt-3.5-turbo'; // 文本优化模型
+const OPENAI_MODEL_SUMMARY = process.env.OPENAI_MODEL_SUMMARY || 'gpt-4'; // 总结和翻译模型
+
+console.log(`🤖 AI模型配置:`);
+console.log(`   - 文本优化: ${OPENAI_MODEL_OPTIMIZATION}`);
+console.log(`   - 内容总结: ${OPENAI_MODEL_SUMMARY}`);
 
 // 初始化OpenAI客户端（用于总结和文本优化）
 const openai = new OpenAI({
@@ -85,7 +158,7 @@ const openai = new OpenAI({
  */
 async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outputLanguage = 'zh', tempDir = null, audioLanguage = 'auto', originalUrl = null, sessionId = null, sendProgressCallback = null, podcastTitle = null) {
     try {
-        console.log(`🤖 开始音频处理 - OpenAI`);
+        console.log(`🤖 开始音频处理 - Whisper本地转录`);
         
         // 确保 audioFiles 是数组
         const files = Array.isArray(audioFiles) ? audioFiles : [audioFiles];
@@ -102,19 +175,29 @@ async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outpu
             const scriptPath = path.join(__dirname, '..', 'whisper_transcribe.py');
             const filePrefix = generateFilePrefix('raw', podcastTitle || 'Untitled');
             const venvPython = path.join(__dirname, '..', '..', 'venv', 'bin', 'python');
-            const command = `"${venvPython}" "${scriptPath}" "${files[0]}" --model ${process.env.WHISPER_MODEL || 'base'} --save-transcript "${tempDir}" --file-prefix "${filePrefix}" --podcast-title "${podcastTitle || 'Untitled'}" --source-url "${originalUrl || ''}"`;
+            
+            const args = [
+                files[0],
+                '--model', WHISPER_MODEL,
+                '--device', WHISPER_DEVICE,
+                '--compute-type', WHISPER_COMPUTE_TYPE,
+                '--save-transcript', tempDir,
+                '--file-prefix', filePrefix,
+                '--podcast-title', podcastTitle || 'Untitled',
+                '--source-url', originalUrl || ''
+            ];
             
             console.log(`🎤 Python脚本转录并保存: ${path.basename(files[0])}`);
-            console.log(`⚙️ 执行命令: ${command}`);
+            console.log(`⚙️ 使用 ${WHISPER_DEVICE.toUpperCase()} 模式...`);
             
-            const { stdout, stderr } = await execAsync(command, {
+            // 使用 spawn 实时输出日志
+            const { stdout, stderr } = await execPythonWithProgress(venvPython, scriptPath, args, {
                 cwd: path.join(__dirname, '..'),
-                maxBuffer: 1024 * 1024 * 20,
-                timeout: 3600000 // 1小时超时，支持长音频
+                timeout: 3600000 // 1小时超时
             });
             
             if (stderr && stderr.trim()) {
-                console.log(`🔧 Whisper日志: ${stderr.trim()}`);
+                console.log(`🔧 Whisper完整日志已收集`);
             }
             
             const result = JSON.parse(stdout);
@@ -129,147 +212,31 @@ async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outpu
             // 获取检测到的语言信息
             result.detectedLanguage = result.language || audioLanguage || 'auto';
             
-            console.log(`✅ Python脚本转录完成: ${transcript.length} 字符`);
+            console.log(`✅ Whisper转录完成: ${transcript.length} 字符`);
             console.log(`🌐 检测到语言: ${result.detectedLanguage}`);
-            console.log(`💾 Python脚本保存了 ${savedFiles.length} 个文件`);
+            console.log(`💾 转录文件已保存: ${savedFiles.length} 个文件`);
 
-            // 对转录文本进行智能优化（错别字修正+格式化）
-            let optimizedTranscript = transcript; // 默认使用原始文本
-            let optimizationSuccess = false;
-            
-            // 发送优化阶段进度
+            // 发送完成进度
             if (sendProgressCallback) {
-                sendProgressCallback(50, 'optimizing', outputLanguage === 'zh' ? '优化转录文本' : 'Optimizing transcript');
+                sendProgressCallback(90, 'complete', outputLanguage === 'zh' ? '转录完成' : 'Transcription complete');
             }
             
-            for (let retryCount = 0; retryCount < 3; retryCount++) {
-                try {
-                    console.log(`📝 开始智能优化转录文本${retryCount > 0 ? ` (重试 ${retryCount}/3)` : ''}...`);
-                    // 检测转录文本的实际语言，用于优化提示词
-                    const detectedLanguage = detectTranscriptLanguage(transcript, audioLanguage);
-                    optimizedTranscript = await formatTranscriptText(transcript, detectedLanguage);
-                    optimizationSuccess = true;
-                    break;
-                } catch (optimizationError) {
-                    console.error(`❌ 文本优化失败 (尝试 ${retryCount + 1}/3): ${optimizationError.message}`);
-                    if (retryCount < 2) {
-                        console.log(`⏳ 等待 ${(retryCount + 1) * 3} 秒后重试...`);
-                        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 3000));
-                    }
-                }
-            }
-            
-            if (optimizationSuccess) {
-                // 保存原始转录备份和优化后的文本
-                if (savedFiles.length > 0) {
-                    const transcriptFile = savedFiles.find(f => f.type === 'transcript');
-                    if (transcriptFile && fs.existsSync(transcriptFile.path)) {
-                        // 备份原始转录文件
-                        const originalBackupPath = transcriptFile.path.replace('.md', '_original.md');
-                        if (!fs.existsSync(originalBackupPath)) {
-                            fs.copyFileSync(transcriptFile.path, originalBackupPath);
-                            console.log(`💾 原始转录已备份: ${path.basename(originalBackupPath)}`);
-                        }
-                        
-                        // 保存优化后的文本
-                        fs.writeFileSync(transcriptFile.path, optimizedTranscript, 'utf8');
-                        console.log(`📄 优化文本已保存: ${transcriptFile.filename}`);
-                        
-                        // 添加备份文件到结果中
-                        savedFiles.push({
-                            type: 'original_transcript',
-                            filename: path.basename(originalBackupPath),
-                            path: originalBackupPath,
-                            size: fs.statSync(originalBackupPath).size
-                        });
-                    }
-                }
-                // 更新结果
-                transcript = optimizedTranscript;
-            } else {
-                console.warn(`🔄 AI优化失败，保留原始转录文本`);
-                // 保持原始transcript不变，确保转录结果不丢失
-            }
-            
-            // 如果需要总结，使用优化后的转录文本进行AI总结
-            if (shouldSummarize) {
-                console.log(`📝 开始生成总结...`);
-                if (sessionId && sendProgressCallback) {
-                    const stageText = outputLanguage === 'zh' ? '总结' : 'Summary';
-                    sendProgressCallback(sessionId, 70, 'summary', stageText);
-                }
-                const summary = await generateSummary(transcript, outputLanguage);
-                
-                // 保存AI总结（Markdown格式）
-                const summaryPrefix = generateFilePrefix('summary', podcastTitle || 'Untitled');
-                const summaryFileName = `${summaryPrefix}.md`;
-                const summaryPath = path.join(tempDir, summaryFileName);
-                const markdownSummary = formatSummaryAsMarkdown(summary, podcastTitle, outputLanguage, originalUrl);
-                fs.writeFileSync(summaryPath, markdownSummary, 'utf8');
-                
-                savedFiles.push({
-                    type: 'summary',
-                    filename: summaryFileName,
-                    path: summaryPath,
-                    size: fs.statSync(summaryPath).size
-                });
-                
-                console.log(`📋 AI总结已保存: ${summaryFileName}`);
-                
-                // 更新result中的summary
-                result.summary = summary;
-            }
-            
-            // 检查是否需要翻译
-            if (result.detectedLanguage && needsTranslation(result.detectedLanguage, outputLanguage)) {
-                console.log(`🌍 检测到语言差异 (${result.detectedLanguage} ≠ ${outputLanguage})，开始翻译...`);
-                
-                try {
-                    const translatedTranscript = await translateTranscript(transcript, result.detectedLanguage, outputLanguage);
-                    
-                    // 保存翻译结果（Markdown格式）
-                    const translationPrefix = generateFilePrefix('translation', podcastTitle || 'Untitled');
-                    const translationFileName = `${translationPrefix}.md`;
-                    const translationPath = path.join(tempDir, translationFileName);
-                    const markdownTranslation = formatTranslationAsMarkdown(translatedTranscript, podcastTitle, outputLanguage, originalUrl);
-                    fs.writeFileSync(translationPath, markdownTranslation, 'utf8');
-                    
-                    savedFiles.push({
-                        type: 'translation',
-                        filename: translationFileName,
-                        path: translationPath,
-                        size: fs.statSync(translationPath).size
-                    });
-                    
-                    console.log(`🌍 翻译已保存: ${translationFileName}`);
-                    
-                    // 更新result中的translation信息
-                    result.translation = translatedTranscript;
-                    result.needsTranslation = true;
-                } catch (error) {
-                    console.error('❌ 翻译过程失败:', error.message);
-                    result.needsTranslation = false;
-                }
-            } else {
-                console.log(`✅ 无需翻译 (语言一致: ${result.detectedLanguage} = ${outputLanguage})`);
-                result.needsTranslation = false;
-            }
-            // 返回处理后的结果
+            // 返回处理后的结果（不再进行AI优化和总结）
             return {
                 transcript: transcript,
-                summary: result.summary || null, // 如果有总结则包含
-                translation: result.translation || null, // 如果有翻译则包含
+                summary: null,
+                translation: null,
                 language: outputLanguage,
                 detectedLanguage: result.detectedLanguage,
-                needsTranslation: result.needsTranslation || false,
-                audioDuration: result.audioDuration, // 从Whisper获取的真实音频时长
+                needsTranslation: false,
+                audioDuration: result.audioDuration,
                 savedFiles: savedFiles
             };
             
         } else {
             // 多文件并发处理
             console.log(`🎬 多文件并发处理模式`);
-            const transcribeResult = await transcribeMultipleAudios(files, outputLanguage, !shouldSummarize && tempDir, tempDir);
+            const transcribeResult = await transcribeMultipleAudios(files, outputLanguage, tempDir, tempDir);
             
             // 处理返回值（可能是字符串或对象）
             let transcript;
@@ -282,19 +249,19 @@ async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outpu
                 transcript = transcribeResult;
             }
             
-            let finalResult = {
-                transcript: transcript,
-                language: outputLanguage,
-                savedFiles: savedFiles
-            };
-
-            if (shouldSummarize) {
-                console.log(`📝 开始生成总结...`);
-                const summary = await generateSummary(transcript, outputLanguage);
-                finalResult.summary = summary;
+            // 发送完成进度
+            if (sendProgressCallback) {
+                sendProgressCallback(90, 'complete', outputLanguage === 'zh' ? '转录完成' : 'Transcription complete');
             }
             
-            return finalResult;
+            return {
+                transcript: transcript,
+                summary: null,
+                translation: null,
+                language: outputLanguage,
+                needsTranslation: false,
+                savedFiles: savedFiles
+            };
         }
 
     } catch (error) {
@@ -443,7 +410,7 @@ async function transcribeAudioLocal(audioPath, language = null, shouldSaveDirect
         // 构建Python命令
         const scriptPath = path.join(__dirname, '..', 'whisper_transcribe.py');
         const venvPython = path.join(__dirname, '..', '..', 'venv', 'bin', 'python');
-        let command = `"${venvPython}" "${scriptPath}" "${audioPath}" --model ${WHISPER_MODEL}`;
+        let command = `"${venvPython}" "${scriptPath}" "${audioPath}" --model ${WHISPER_MODEL} --device ${WHISPER_DEVICE} --compute-type ${WHISPER_COMPUTE_TYPE}`;
         
         if (language) {
             command += ` --language ${language}`;
@@ -462,7 +429,7 @@ async function transcribeAudioLocal(audioPath, language = null, shouldSaveDirect
             command += ` --source-url "${originalUrl}"`;
         }
         
-        console.log(`⚙️ 执行命令: ${command}`);
+        console.log(`⚙️ 使用 ${WHISPER_DEVICE.toUpperCase()} 执行转录...`);
         
         // 执行转录脚本
         const { stdout, stderr } = await execAsync(command, {
@@ -605,7 +572,7 @@ Original transcript text:
 ${rawTranscript}`;
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: OPENAI_MODEL_OPTIMIZATION,
             messages: [
                 {
                     role: 'system',
@@ -684,7 +651,7 @@ Requirements:
 Please output the optimized text directly in the original language without any explanations or annotations.`;
 
         const response = await openai.chat.completions.create({
-            model: "gpt-4",
+            model: OPENAI_MODEL_SUMMARY,
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: rawTranscript }
@@ -856,18 +823,37 @@ Bitte erstellen Sie eine strukturierte Zusammenfassung des Podcast-Inhalts mit S
  */
 async function generateDirectSummary(transcript, outputLanguage) {
     const systemPrompt = getSystemPromptByLanguage(outputLanguage);
+    
+    // 确保 max_tokens 至少为 1000，避免输入过短导致输出被截断
+    const calculatedMaxTokens = Math.floor(transcript.length * 0.4);
+    const maxTokens = Math.min(3000, Math.max(1000, calculatedMaxTokens));
+    console.log(`📝 生成总结，输入长度: ${transcript.length} 字符, max_tokens: ${maxTokens}`);
 
         const response = await openai.chat.completions.create({
-            model: "gpt-4",
+            model: OPENAI_MODEL_SUMMARY,
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: transcript }
             ],
             temperature: 0.5,
-        max_tokens: Math.min(3000, Math.floor(transcript.length * 0.4))
+        max_tokens: maxTokens
         });
 
         const summary = response.choices[0].message.content.trim();
+    
+    // 检查finish_reason
+    const finishReason = response.choices[0].finish_reason;
+    if (finishReason !== 'stop') {
+        console.warn(`⚠️ 总结生成finish_reason: ${finishReason} (可能被截断)`);
+    }
+    
+    // 检查是否返回空内容
+    if (!summary || summary.length < 50) {
+        console.warn(`⚠️ 总结生成返回空或过短内容: ${summary.length} 字符`);
+        console.warn(`⚠️ 返回内容: "${summary}"`);
+        throw new Error('AI返回的总结内容为空或过短');
+    }
+    
     const formattedSummary = ensureMarkdownParagraphs(summary);
     console.log(`📄 总结生成完成: ${formattedSummary.length} 字符`);
     
@@ -1030,7 +1016,7 @@ async function generateChunkSummary(chunkText, outputLanguage) {
     const systemPrompt = getChunkSummaryPrompt(outputLanguage);
 
     const response = await openai.chat.completions.create({
-        model: "gpt-4",
+        model: OPENAI_MODEL_SUMMARY,
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: chunkText }
@@ -1040,6 +1026,20 @@ async function generateChunkSummary(chunkText, outputLanguage) {
     });
 
     const chunkSummary = response.choices[0].message.content.trim();
+    
+    // 检查finish_reason
+    const finishReason = response.choices[0].finish_reason;
+    if (finishReason !== 'stop') {
+        console.warn(`⚠️ 分块总结finish_reason: ${finishReason}`);
+    }
+    
+    // 检查是否返回空内容
+    if (!chunkSummary || chunkSummary.length < 20) {
+        console.warn(`⚠️ 分块总结返回空或过短: ${chunkSummary.length} 字符`);
+        throw new Error('分块总结返回空内容');
+    }
+    
+    console.log(`✓ 分块总结: ${chunkText.length} → ${chunkSummary.length} 字符`);
     return ensureMarkdownParagraphs(chunkSummary);
 }
 
@@ -1122,7 +1122,7 @@ async function generateFinalSummary(combinedSummary, outputLanguage) {
     const systemPrompt = getFinalSummaryPrompt(outputLanguage);
 
     const response = await openai.chat.completions.create({
-                model: "gpt-4",
+                model: OPENAI_MODEL_SUMMARY,
                 messages: [
             { role: "system", content: systemPrompt },
                     { role: "user", content: combinedSummary }
@@ -1132,6 +1132,23 @@ async function generateFinalSummary(combinedSummary, outputLanguage) {
     });
 
     const finalSummary = response.choices[0].message.content.trim();
+    
+    // 检查finish_reason
+    const finishReason = response.choices[0].finish_reason;
+    if (finishReason !== 'stop') {
+        console.warn(`⚠️ 最终总结finish_reason: ${finishReason}`);
+    }
+    
+    // 检查是否返回空内容
+    if (!finalSummary || finalSummary.length < 50) {
+        console.warn(`⚠️ 最终总结返回空或过短: ${finalSummary.length} 字符`);
+        console.warn(`⚠️ 返回内容: "${finalSummary}"`);
+        // 如果最终整合失败，直接返回分块总结
+        console.log('📝 使用分块总结代替最终整合总结');
+        return ensureMarkdownParagraphs(combinedSummary);
+    }
+    
+    console.log(`✓ 最终总结: ${combinedSummary.length} → ${finalSummary.length} 字符`);
     return ensureMarkdownParagraphs(finalSummary);
 }
 
@@ -1141,84 +1158,82 @@ async function generateFinalSummary(combinedSummary, outputLanguage) {
 async function formatSingleChunk(chunkText, transcriptLanguage = 'zh') {
     try {
         const prompt = transcriptLanguage === 'zh' ? 
-            `请对以下音频转录文本进行智能优化和格式化，要求：
+            `请对以下音频转录文本进行格式优化。
 
-**内容优化（正确性优先）：**
-1. **错误修正**：转录错误、错别字、同音字混淆、品牌名称/专有名词音译错误
-2. **表达优化**：适度改善语法，补全不完整句子，保持原意和语言不变
-3. **口语处理**：保留自然语气词（嗯、啊、那个），删除过度重复，添加合适标点
+**重要：必须保留全部内容，不要删减或总结！**
 
-**分段规则（按优先级）：**
-1. **强制分段边界**：
-   - 商业内容转换：广告→正题，不同品牌切换
-   - 节目环节转换：开场→正题→结尾
-   - 发言人变化：主持人↔嘉宾，问答边界
-2. **话题转换分段**：
-   - 内容类型：技术细节→商业成就→数据统计→行业挑战→未来展望
-   - 论述角度：产品介绍→公司发展→环保影响→解决方案
-   - 时间线：过去经历→现在成就→未来计划
-3. **长度控制**：单段不超过200字，超长必须按完整思路分段
+任务要求：
+1. 修正明显的转录错误和错别字
+2. 添加合适的标点符号
+3. 按话题自然分段（段落间用空行分隔）
+4. 保持原意不变，保留所有内容
 
-**格式要求**：Markdown格式，段落间用双换行分隔，保持对话自然流畅性
+直接输出优化后的完整文本，不要添加任何解释或标题：
 
-**重要提醒**：不要添加额外的分隔线（如---）或多余的空行，段落间只需标准的双换行分隔
-
-**核心原则**：优化可读性的同时保持原意，长篇论述按话题转换合理分段
-
-**上下文处理**：如有[上文续：...]标记，利用上下文理解完整含义，但不要在输出中包含标记，不要重复上下文内容，只输出新内容部分
-
-原始转录文本：
 ${chunkText}` :
-            `Please intelligently optimize and format the following audio transcript text:
+            `Please format and optimize the following audio transcript.
 
-**Content Optimization (Accuracy First):**
-1. **Error Correction**: Transcription errors, typos, homophone confusions, brand names/proper noun errors
-2. **Expression Enhancement**: Moderate grammar improvement, complete incomplete sentences, preserve original meaning and language
-3. **Speech Processing**: Keep natural filler words (um, ah, like, you know), remove excessive repetitions, add appropriate punctuation
+**IMPORTANT: Keep ALL content, do NOT summarize or reduce!**
 
-**Segmentation Rules (By Priority):**
-1. **Mandatory Segmentation Boundaries**:
-   - Commercial content transitions: ads→main content, brand switching
-   - Program segment transitions: opening→main content→ending
-   - Speaker changes: host↔guest, question-answer boundaries
-2. **Topic Transition Segmentation**:
-   - Content types: technical details→business achievements→data statistics→industry challenges→future outlook
-   - Perspective shifts: product introduction→company development→environmental impact→solutions
-   - Timeline: past experiences→current achievements→future plans
-3. **Length Control**: Single paragraphs should not exceed 300 words, long content must be segmented by complete thoughts
+Requirements:
+1. Fix obvious transcription errors and typos
+2. Add appropriate punctuation
+3. Add paragraph breaks at natural topic changes (use blank lines)
+4. Preserve original meaning and ALL content
 
-**Format Requirements**: Markdown format, double line breaks between paragraphs, maintain natural conversational flow
+Output the complete optimized text directly, without any explanations or headers:
 
-**Important Reminder**: Do not add extra separators (like ---) or excessive blank lines, use only standard double line breaks between paragraphs
-
-**Core Principle**: Optimize readability while preserving original meaning, segment long monologues by topic transitions
-
-**Context Handling**: If [Context continued: ...] markers exist, use context to understand complete meaning but do not include markers in output, do not repeat context content, only output new content parts
-
-Original transcript text:
 ${chunkText}`;
 
+        // 动态计算 max_tokens：输入长度的 1.5 倍（考虑中文字符），最少 4096，最多 16384
+        const estimatedTokens = Math.ceil(chunkText.length * 0.7); // 中文约 1.5 字符/token
+        const dynamicMaxTokens = Math.min(16384, Math.max(4096, Math.ceil(estimatedTokens * 1.5)));
+        
+        console.log(`📝 调用AI优化: 输入 ${chunkText.length} 字符, max_tokens: ${dynamicMaxTokens}`);
+
         const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: OPENAI_MODEL_OPTIMIZATION,
             messages: [
                 {
                     role: 'system',
-                    content: '你是一个专业的音频转录文本优化助手，负责修正转录错误、改善文本通顺度和排版格式，但必须保持原意不变，不删减或添加内容。'
+                    content: '你是文本格式优化助手。你的任务是修正错误和添加分段，但必须保留全部原始内容。绝对不要删减、总结或省略任何内容。'
                 },
                 {
                     role: 'user',
                     content: prompt
                 }
             ],
-            max_tokens: 4096,
+            max_tokens: dynamicMaxTokens,
             temperature: 0.1
         });
 
         const optimizedText = response.choices[0].message.content.trim();
+        
+        // 检查finish_reason，诊断是否被截断
+        const finishReason = response.choices[0].finish_reason;
+        if (finishReason !== 'stop') {
+            console.warn(`⚠️ AI响应finish_reason: ${finishReason} (可能被截断)`);
+        }
+        
+        // 检查响应长度是否合理（优化后不应少于原文的30%）
+        const minExpectedLength = chunkText.length * 0.3;
+        if (optimizedText.length < minExpectedLength) {
+            console.warn(`⚠️ AI响应过短: 输入 ${chunkText.length} 字符, 输出 ${optimizedText.length} 字符 (期望至少 ${Math.round(minExpectedLength)} 字符)`);
+            console.warn(`⚠️ AI响应内容预览: ${optimizedText.substring(0, 200)}...`);
+            
+            // 如果输出过短，使用基本格式化保留原始内容
+            console.log('📝 使用基本格式化代替过短的AI响应');
+            return applyBasicFormatting(chunkText);
+        }
+        
+        console.log(`✓ AI响应正常: ${chunkText.length} → ${optimizedText.length} 字符`);
         return ensureMarkdownParagraphs(optimizedText);
         
     } catch (error) {
         console.error('❌ 单块文本优化失败:', error.message);
+        if (error.response) {
+            console.error('❌ API错误详情:', JSON.stringify(error.response.data || error.response, null, 2));
+        }
         return applyBasicFormatting(chunkText); // 失败时使用基本格式化
     }
 }
@@ -1662,7 +1677,7 @@ async function translateDirect(transcript, sourceName, targetName) {
 ${transcript}`;
 
     const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: OPENAI_MODEL_SUMMARY,
         messages: [
             {
                 role: "user",

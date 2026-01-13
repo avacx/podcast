@@ -325,8 +325,9 @@ app.get('/api/download/:filename', (req, res) => {
             });
         }
 
-        // 设置下载响应头
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        // 设置下载响应头 - 对文件名进行 URL 编码以支持中文
+        const encodedFilename = encodeURIComponent(filename);
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
         // 发送文件

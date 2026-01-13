@@ -37,7 +37,7 @@ class LocalWhisperTranscriber:
             dict: 转录结果
         """
         try:
-            print(f"🎤 开始转录: {audio_path}", file=sys.stderr)
+            print(f"🎤 开始转录: {audio_path}", file=sys.stderr, flush=True)
             start_time = time.time()
             
             # 执行转录
@@ -51,6 +51,7 @@ class LocalWhisperTranscriber:
             # 收集所有片段
             transcript_segments = []
             full_text = ""
+            segment_count = 0
             
             for segment in segments:
                 segment_dict = {
@@ -60,6 +61,11 @@ class LocalWhisperTranscriber:
                 }
                 transcript_segments.append(segment_dict)
                 full_text += segment.text.strip() + " "
+                
+                # 每处理 10 个片段输出一次进度
+                segment_count += 1
+                if segment_count % 10 == 0:
+                    print(f"⏳ 已处理 {segment_count} 个片段，当前时间点: {segment.end:.1f}秒", file=sys.stderr, flush=True)
             
             duration = time.time() - start_time
             
@@ -74,7 +80,7 @@ class LocalWhisperTranscriber:
                 "processing_time": round(duration, 2)
             }
             
-            print(f"✅ 转录完成: {duration:.1f}秒", file=sys.stderr)
+            print(f"✅ 转录完成: {duration:.1f}秒，共 {segment_count} 个片段", file=sys.stderr, flush=True)
             return result
             
         except Exception as e:
@@ -84,7 +90,7 @@ class LocalWhisperTranscriber:
                 "error": str(e),
                 "text": ""
             }
-            print(f"❌ 转录失败: {e}", file=sys.stderr)
+            print(f"❌ 转录失败: {e}", file=sys.stderr, flush=True)
             return error_result
 
     def transcribe_multiple(self, audio_paths, language=None):
