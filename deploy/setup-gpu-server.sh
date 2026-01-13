@@ -59,10 +59,7 @@ if [ -d "$PROJECT_DIR" ]; then
     git pull
 else
     echo "📂 克隆项目..."
-    # 如果你有 git 仓库，替换下面的 URL
-    # git clone https://github.com/your-repo/podcast-transcriber.git "$PROJECT_DIR"
-    echo "⚠️ 请手动上传项目文件到 $PROJECT_DIR"
-    mkdir -p "$PROJECT_DIR"
+    git clone https://github.com/avacx/podcast.git "$PROJECT_DIR"
 fi
 
 cd "$PROJECT_DIR"
