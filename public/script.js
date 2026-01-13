@@ -1046,6 +1046,13 @@ function activateTab(tabId) {
 
 // SSE 进度监听函数
 function setupProgressListener(eventSource) {
+    // 显示日志区域
+    const logSection = document.getElementById('logSection');
+    const logContent = document.getElementById('logContent');
+    if (logSection) {
+        logSection.classList.remove('hidden');
+    }
+    
     eventSource.onmessage = function(event) {
         try {
             const data = JSON.parse(event.data);
@@ -1056,8 +1063,14 @@ function setupProgressListener(eventSource) {
                     smartProgressBar.updateProgress(data.progress, data.stageText, true);
                 }
                 
+                // 添加日志
+                addLog(`[${data.progress}%] ${data.stageText}`);
                 console.log(`📊 收到进度更新: ${data.progress}% - ${data.stageText}`);
+            } else if (data.type === 'log') {
+                // 处理详细日志消息
+                addLog(data.message);
             } else if (data.type === 'connected') {
+                addLog('✅ 连接已建立，等待转录开始...');
                 console.log('✅ SSE连接已建立:', data.sessionId);
             }
         } catch (error) {
@@ -1069,6 +1082,24 @@ function setupProgressListener(eventSource) {
         console.error('SSE连接错误:', error);
         eventSource.close();
     };
+}
+
+// 添加日志到前端显示
+function addLog(message) {
+    const logContent = document.getElementById('logContent');
+    if (logContent) {
+        const timestamp = new Date().toLocaleTimeString();
+        const logLine = document.createElement('div');
+        logLine.className = 'log-line py-0.5';
+        logLine.innerHTML = `<span class="text-gray-500">[${timestamp}]</span> ${message}`;
+        logContent.appendChild(logLine);
+        
+        // 自动滚动到底部
+        const logContainer = document.getElementById('logContainer');
+        if (logContainer) {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+    }
 }
 
 // 兼容性函数 - 更新进度显示

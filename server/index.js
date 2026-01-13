@@ -86,6 +86,18 @@ function sendProgress(sessionId, progress, stage, stageText) {
     }
 }
 
+// 发送日志消息到前端
+function sendLog(sessionId, message) {
+    const client = progressClients.get(sessionId);
+    if (client) {
+        const data = {
+            type: 'log',
+            message: message
+        };
+        client.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+}
+
 // API路由
 app.post('/api/process-podcast', async (req, res) => {
     try {
@@ -157,7 +169,10 @@ app.post('/api/process-podcast', async (req, res) => {
             sendProgress(sessionId, 30, 'transcription', stageText);
         }
         
-        const result = await processAudioWithOpenAI(audioFiles, shouldSummarize, outputLanguage, tempDir, audioLanguage, url, sessionId, sendProgress, podcastTitle);
+        // 创建发送日志的回调函数
+        const sendLogCallback = (message) => sendLog(sessionId, message);
+        
+        const result = await processAudioWithOpenAI(audioFiles, shouldSummarize, outputLanguage, tempDir, audioLanguage, url, sessionId, sendProgress, podcastTitle, sendLogCallback);
 
         // 步骤4: 获取保存的文件信息
         const savedFiles = result.savedFiles || [];

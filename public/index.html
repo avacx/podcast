@@ -304,26 +304,17 @@
                     </p>
                 </div>
 
-                <!-- Operation Type -->
-                <div class="mb-6">
-                    <label class="text-sm font-medium text-slate-700 mb-3 block" id="operationLabel">
-                        操作类型
+                <!-- Operation Type - 已简化为仅转录 -->
+                <input type="hidden" name="operation" value="transcribe_only">
+                
+                <!-- 详细日志显示区域 -->
+                <div id="logSection" class="hidden mb-6">
+                    <label class="text-sm font-medium text-slate-700 mb-3 block">
+                        <span class="text-lg mr-2">📋</span>
+                        <span id="logLabel">转录日志</span>
                     </label>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <label class="flex items-center p-4 border border-slate-200 rounded-xl cursor-pointer hover:bg-blue-50 transition-all">
-                            <input type="radio" name="operation" value="transcribe_summarize" checked class="mr-3 text-blue-600">
-                            <div>
-                                <div class="font-medium text-slate-800" id="option1Title">转录并总结</div>
-                                <div class="text-sm text-slate-600" id="option1Desc">获得转录文本和AI总结</div>
-                            </div>
-                        </label>
-                        <label class="flex items-center p-4 border border-slate-200 rounded-xl cursor-pointer hover:bg-blue-50 transition-all">
-                            <input type="radio" name="operation" value="transcribe_only" class="mr-3 text-blue-600">
-                            <div>
-                                <div class="font-medium text-slate-800" id="option2Title">仅转录</div>
-                                <div class="text-sm text-slate-600" id="option2Desc">只获得转录文本</div>
-                            </div>
-                        </label>
+                    <div id="logContainer" class="bg-slate-900 text-green-400 font-mono text-sm p-4 rounded-xl max-h-64 overflow-y-auto">
+                        <div id="logContent"></div>
                     </div>
                 </div>
 

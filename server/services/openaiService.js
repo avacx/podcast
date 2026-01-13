@@ -20,19 +20,23 @@ function execPythonWithProgress(pythonPath, scriptPath, args, options = {}) {
         
         let stdout = '';
         let stderr = '';
-        let lastLogTime = Date.now();
         
         // 实时输出 stderr (日志)
         proc.stderr.on('data', (data) => {
             const text = data.toString();
             stderr += text;
             
-            // 每 2 秒输出一次日志，避免刷屏
-            const now = Date.now();
-            if (now - lastLogTime > 2000) {
-                console.log(`[Whisper] ${text.trim()}`);
-                lastLogTime = now;
-            }
+            // 输出到控制台
+            const lines = text.trim().split('\n');
+            lines.forEach(line => {
+                if (line.trim()) {
+                    console.log(`[Whisper] ${line.trim()}`);
+                    // 如果有日志回调，发送到前端
+                    if (options.onLog) {
+                        options.onLog(line.trim());
+                    }
+                }
+            });
         });
         
         // 收集 stdout (JSON 结果)
@@ -156,13 +160,15 @@ const openai = new OpenAI({
  * @param {string} outputLanguage - 输出语言
  * @returns {Promise<Object>} - 处理结果
  */
-async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outputLanguage = 'zh', tempDir = null, audioLanguage = 'auto', originalUrl = null, sessionId = null, sendProgressCallback = null, podcastTitle = null) {
+async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outputLanguage = 'zh', tempDir = null, audioLanguage = 'auto', originalUrl = null, sessionId = null, sendProgressCallback = null, podcastTitle = null, sendLogCallback = null) {
     try {
         console.log(`🤖 开始音频处理 - Whisper本地转录`);
+        if (sendLogCallback) sendLogCallback('🤖 开始音频处理 - Whisper本地转录');
         
         // 确保 audioFiles 是数组
         const files = Array.isArray(audioFiles) ? audioFiles : [audioFiles];
         console.log(`📄 处理文件数量: ${files.length}`);
+        if (sendLogCallback) sendLogCallback(`📄 处理文件数量: ${files.length}`);
 
         let transcript = '';
         let savedFiles = [];
@@ -170,6 +176,7 @@ async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outpu
         if (files.length === 1) {
             // 单文件处理 - Python脚本总是保存转录文本
             console.log(`🎵 单文件处理模式`);
+            if (sendLogCallback) sendLogCallback('🎵 单文件处理模式');
             
             // Python脚本转录并直接保存转录文本
             const scriptPath = path.join(__dirname, '..', 'whisper_transcribe.py');
@@ -189,11 +196,16 @@ async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outpu
             
             console.log(`🎤 Python脚本转录并保存: ${path.basename(files[0])}`);
             console.log(`⚙️ 使用 ${WHISPER_DEVICE.toUpperCase()} 模式...`);
+            if (sendLogCallback) {
+                sendLogCallback(`🎤 开始转录: ${path.basename(files[0])}`);
+                sendLogCallback(`⚙️ 使用 ${WHISPER_DEVICE.toUpperCase()} + ${WHISPER_MODEL} 模型`);
+            }
             
-            // 使用 spawn 实时输出日志
+            // 使用 spawn 实时输出日志，传递日志回调
             const { stdout, stderr } = await execPythonWithProgress(venvPython, scriptPath, args, {
                 cwd: path.join(__dirname, '..'),
-                timeout: 3600000 // 1小时超时
+                timeout: 3600000, // 1小时超时
+                onLog: sendLogCallback // 传递日志回调
             });
             
             if (stderr && stderr.trim()) {
