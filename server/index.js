@@ -365,12 +365,12 @@ app.get('/api/download-all', async (req, res) => {
         const { promisify } = require('util');
         const execAsync = promisify(exec);
         
-        // 获取所有转录和总结文件
+        // 获取所有转录和总结文件（修正匹配规则）
         const files = fs.readdirSync(tempDir).filter(file => 
-            file.endsWith('_transcript.md') || 
-            file.endsWith('_summary.md') ||
-            file.endsWith('_transcript.txt') ||
-            file.endsWith('_summary.txt')
+            (file.startsWith('raw_') && file.endsWith('.md')) ||
+            (file.startsWith('summary_') && file.endsWith('.md')) ||
+            file.includes('_transcript') ||
+            file.includes('_summary')
         );
         
         if (files.length === 0) {
@@ -380,7 +380,7 @@ app.get('/api/download-all', async (req, res) => {
             });
         }
         
-        console.log(`📦 批量导出 ${files.length} 个文件`);
+        console.log(`📦 批量导出 ${files.length} 个文件:`, files);
         
         // 创建 ZIP 文件名
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -392,9 +392,23 @@ app.get('/api/download-all', async (req, res) => {
             fs.unlinkSync(zipFilePath);
         }
         
-        // 使用系统 zip 命令打包文件
-        const fileList = files.map(f => `"${f}"`).join(' ');
-        await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" ${fileList}`);
+        // 使用系统 zip 命令打包文件（处理特殊字符）
+        const fileListFile = path.join(tempDir, '.filelist.txt');
+        fs.writeFileSync(fileListFile, files.join('\n'));
+        
+        try {
+            await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" -@ < .filelist.txt`);
+        } catch (zipError) {
+            // 如果 -@ 不支持，尝试另一种方式
+            console.log('尝试备用 zip 方法...');
+            const escapedFiles = files.map(f => `'${f.replace(/'/g, "'\\''")}'`).join(' ');
+            await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" ${escapedFiles}`);
+        }
+        
+        // 清理临时文件列表
+        if (fs.existsSync(fileListFile)) {
+            fs.unlinkSync(fileListFile);
+        }
         
         // 检查 ZIP 是否创建成功
         if (!fs.existsSync(zipFilePath)) {
@@ -472,8 +486,20 @@ app.post('/api/download-selected', async (req, res) => {
             fs.unlinkSync(zipFilePath);
         }
         
-        const fileList = validFiles.map(f => `"${f}"`).join(' ');
-        await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" ${fileList}`);
+        // 使用文件列表方式处理特殊字符
+        const fileListFile = path.join(tempDir, '.filelist_selected.txt');
+        fs.writeFileSync(fileListFile, validFiles.join('\n'));
+        
+        try {
+            await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" -@ < .filelist_selected.txt`);
+        } catch (zipError) {
+            const escapedFiles = validFiles.map(f => `'${f.replace(/'/g, "'\\''")}'`).join(' ');
+            await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" ${escapedFiles}`);
+        }
+        
+        if (fs.existsSync(fileListFile)) {
+            fs.unlinkSync(fileListFile);
+        }
         
         if (!fs.existsSync(zipFilePath)) {
             throw new Error('ZIP 文件创建失败');
