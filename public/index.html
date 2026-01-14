@@ -440,6 +440,43 @@
             </div>
         </div>
 
+        <!-- History Section -->
+        <div id="historySection" class="mb-8">
+            <div class="glass rounded-2xl shadow-xl border border-white/20 p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-slate-700 flex items-center">
+                        <span class="mr-2">📚</span>
+                        <span>历史记录</span>
+                    </h3>
+                    <div class="flex gap-2">
+                        <button onclick="loadHistory()" class="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded hover:bg-slate-200 transition-colors">
+                            刷新
+                        </button>
+                        <button onclick="clearHistory()" class="text-xs bg-red-100 text-red-600 px-3 py-1 rounded hover:bg-red-200 transition-colors">
+                            清空
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 历史记录列表 -->
+                <div id="historyList" class="space-y-2">
+                    <!-- 历史记录将由 JS 动态添加 -->
+                </div>
+                
+                <!-- 空历史提示 -->
+                <div id="emptyHistory" class="text-center py-8 text-slate-400 text-sm">
+                    暂无历史记录
+                </div>
+                
+                <!-- 加载更多 -->
+                <div id="loadMoreHistory" class="hidden mt-4 text-center">
+                    <button onclick="loadMoreHistory()" class="text-sm text-blue-600 hover:text-blue-800">
+                        加载更多...
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Results Section -->
         <div id="resultsSection" class="hidden">
             <div class="glass rounded-2xl shadow-xl border border-white/20 p-8">

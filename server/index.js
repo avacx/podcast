@@ -12,6 +12,7 @@ const { getAudioFiles, estimateAudioDuration } = require('./services/audioInfoSe
 const { cleanupAudioFiles } = require('./utils/fileSaver');
 const { formatSizeKB, formatSizeMB, estimateAudioDurationFromSize } = require('./utils/formatUtils');
 const { taskQueue } = require('./services/queueService');
+const { historyService } = require('./services/historyService');
 
 const app = express();
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
@@ -588,6 +589,69 @@ app.post('/api/estimate-duration', async (req, res) => {
             estimatedDuration: 600 // 默认10分钟
         });
     }
+});
+
+// ========================================
+// 历史记录 API
+// ========================================
+
+// 获取历史记录
+app.get('/api/history', (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 0;
+        const pageSize = parseInt(req.query.pageSize) || 20;
+        const status = req.query.status; // 可选过滤
+        
+        const result = historyService.getHistory({ page, pageSize, status });
+        
+        res.json({
+            success: true,
+            ...result
+        });
+    } catch (error) {
+        console.error('获取历史记录失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '获取历史记录失败'
+        });
+    }
+});
+
+// 获取单条历史记录
+app.get('/api/history/:id', (req, res) => {
+    const record = historyService.getRecord(req.params.id);
+    
+    if (!record) {
+        return res.status(404).json({
+            success: false,
+            error: '记录未找到'
+        });
+    }
+    
+    res.json({
+        success: true,
+        record
+    });
+});
+
+// 删除历史记录
+app.delete('/api/history/:id', (req, res) => {
+    const deleted = historyService.deleteRecord(req.params.id);
+    
+    res.json({
+        success: deleted,
+        message: deleted ? '记录已删除' : '记录未找到'
+    });
+});
+
+// 清空历史记录
+app.delete('/api/history', (req, res) => {
+    historyService.clearHistory();
+    
+    res.json({
+        success: true,
+        message: '历史记录已清空'
+    });
 });
 
 // ========================================

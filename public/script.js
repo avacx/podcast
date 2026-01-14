@@ -97,6 +97,8 @@ const translations = {
 // 批量模式状态
 let isBatchMode = false;
 let queueEventSource = null;
+let historyPage = 0;
+let historyTotal = 0;
 
 // 检测浏览器语言设置
 function detectBrowserLanguage() {
@@ -501,6 +503,231 @@ async function downloadSelectedFiles(filenames) {
     } catch (error) {
         console.error('导出失败:', error);
         alert('导出失败: ' + error.message);
+    }
+}
+
+// ========================================
+// 历史记录功能
+// ========================================
+
+// 加载历史记录
+async function loadHistory(reset = true) {
+    try {
+        if (reset) {
+            historyPage = 0;
+        }
+        
+        const response = await fetch(`/api/history?page=${historyPage}&pageSize=20`);
+        const result = await response.json();
+        
+        if (result.success) {
+            historyTotal = result.total;
+            
+            if (reset) {
+                renderHistoryList(result.records);
+            } else {
+                appendHistoryList(result.records);
+            }
+            
+            // 显示/隐藏加载更多按钮
+            const loadMoreBtn = document.getElementById('loadMoreHistory');
+            if ((historyPage + 1) * 20 < historyTotal) {
+                loadMoreBtn.classList.remove('hidden');
+            } else {
+                loadMoreBtn.classList.add('hidden');
+            }
+        }
+    } catch (error) {
+        console.error('加载历史记录失败:', error);
+    }
+}
+
+// 加载更多历史记录
+function loadMoreHistory() {
+    historyPage++;
+    loadHistory(false);
+}
+
+// 渲染历史记录列表
+function renderHistoryList(records) {
+    const historyList = document.getElementById('historyList');
+    const emptyHistory = document.getElementById('emptyHistory');
+    
+    historyList.innerHTML = '';
+    
+    if (!records || records.length === 0) {
+        emptyHistory.classList.remove('hidden');
+        return;
+    }
+    
+    emptyHistory.classList.add('hidden');
+    
+    records.forEach(record => {
+        historyList.appendChild(createHistoryItem(record));
+    });
+}
+
+// 追加历史记录
+function appendHistoryList(records) {
+    const historyList = document.getElementById('historyList');
+    
+    records.forEach(record => {
+        historyList.appendChild(createHistoryItem(record));
+    });
+}
+
+// 创建历史记录项
+function createHistoryItem(record) {
+    const item = document.createElement('div');
+    item.className = 'flex items-center justify-between bg-slate-50 rounded-lg p-3 hover:bg-slate-100 transition-colors';
+    item.id = `history-${record.id}`;
+    
+    // 状态图标和颜色
+    let statusIcon, statusClass, statusText;
+    switch (record.status) {
+        case 'completed':
+            statusIcon = '✅';
+            statusClass = 'text-green-600';
+            statusText = '已完成';
+            break;
+        case 'processing':
+            statusIcon = '⏳';
+            statusClass = 'text-blue-600';
+            statusText = `处理中 ${record.progress || 0}%`;
+            break;
+        case 'queued':
+            statusIcon = '📋';
+            statusClass = 'text-slate-500';
+            statusText = '排队中';
+            break;
+        case 'failed':
+            statusIcon = '❌';
+            statusClass = 'text-red-600';
+            statusText = '失败';
+            break;
+        default:
+            statusIcon = '❓';
+            statusClass = 'text-slate-400';
+            statusText = record.status;
+    }
+    
+    // 格式化时间
+    const createdAt = new Date(record.createdAt);
+    const timeStr = createdAt.toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    
+    // 显示标题或URL
+    const displayTitle = record.title || truncateUrl(record.url, 40);
+    
+    item.innerHTML = `
+        <div class="flex-1 min-w-0 mr-3">
+            <p class="text-sm font-medium text-slate-700 truncate" title="${record.url}">${displayTitle}</p>
+            <p class="text-xs text-slate-400">${timeStr}</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="${statusClass} text-sm">${statusIcon} ${statusText}</span>
+            ${record.status === 'completed' && record.savedFiles && record.savedFiles.length > 0 ? `
+                <button onclick="downloadHistoryFiles('${record.id}')" class="text-xs bg-green-100 text-green-600 px-2 py-1 rounded hover:bg-green-200">
+                    下载
+                </button>
+            ` : ''}
+            <button onclick="deleteHistoryRecord('${record.id}')" class="text-xs text-slate-400 hover:text-red-500">
+                🗑️
+            </button>
+        </div>
+    `;
+    
+    return item;
+}
+
+// 下载历史记录中的文件
+async function downloadHistoryFiles(recordId) {
+    try {
+        const response = await fetch(`/api/history/${recordId}`);
+        const result = await response.json();
+        
+        if (result.success && result.record.savedFiles && result.record.savedFiles.length > 0) {
+            const filenames = result.record.savedFiles.map(f => f.filename);
+            await downloadSelectedFiles(filenames);
+        } else {
+            alert('没有可下载的文件');
+        }
+    } catch (error) {
+        console.error('下载失败:', error);
+        alert('下载失败: ' + error.message);
+    }
+}
+
+// 删除历史记录
+async function deleteHistoryRecord(recordId) {
+    if (!confirm('确定要删除这条记录吗？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/history/${recordId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            // 从DOM中移除
+            const item = document.getElementById(`history-${recordId}`);
+            if (item) {
+                item.remove();
+            }
+            
+            // 检查是否需要显示空提示
+            const historyList = document.getElementById('historyList');
+            if (historyList.children.length === 0) {
+                document.getElementById('emptyHistory').classList.remove('hidden');
+            }
+        }
+    } catch (error) {
+        console.error('删除失败:', error);
+    }
+}
+
+// 清空历史记录
+async function clearHistory() {
+    if (!confirm('确定要清空所有历史记录吗？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/history', {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            loadHistory();
+        }
+    } catch (error) {
+        console.error('清空历史失败:', error);
+    }
+}
+
+// 检查并恢复队列状态
+async function checkAndRestoreQueue() {
+    try {
+        const response = await fetch('/api/queue/status');
+        const result = await response.json();
+        
+        if (result.success) {
+            // 如果有正在处理或排队的任务，显示队列面板并订阅更新
+            if (result.processing || (result.queue && result.queue.length > 0)) {
+                showQueueSection();
+                updateQueueUI(result);
+                subscribeToQueue();
+            }
+        }
+    } catch (error) {
+        console.error('检查队列状态失败:', error);
     }
 }
 
@@ -1339,6 +1566,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 设置操作类型监听器
     setupOperationTypeListeners();
+    
+    // 加载历史记录
+    loadHistory();
+    
+    // 检查是否有正在进行的任务
+    checkAndRestoreQueue();
 });
 
 // 移除了自动检查已完成文件的功能，让用户每次都有干净的开始

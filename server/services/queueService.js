@@ -3,11 +3,13 @@
  * 确保一次只处理一个转录任务，避免显存溢出
  */
 
+const { historyService } = require('./historyService');
+
 class TaskQueue {
     constructor() {
         this.queue = [];           // 待处理队列
         this.processing = null;    // 当前处理的任务
-        this.completed = [];       // 已完成的任务
+        this.completed = [];       // 已完成的任务（内存中的临时记录）
         this.isProcessing = false; // 是否正在处理
         this.maxCompleted = 50;    // 最多保留的已完成任务数
     }
@@ -28,6 +30,14 @@ class TaskQueue {
         
         this.queue.push(queuedTask);
         console.log(`📥 任务已加入队列: ${taskId}, 队列位置: ${queuedTask.position}`);
+        
+        // 添加到历史记录
+        historyService.addRecord({
+            id: taskId,
+            url: task.url,
+            status: 'queued',
+            progress: 0
+        });
         
         // 如果没有在处理，开始处理队列
         if (!this.isProcessing) {
@@ -63,6 +73,12 @@ class TaskQueue {
 
         console.log(`🚀 开始处理任务: ${this.processing.id}`);
 
+        // 更新历史记录状态
+        historyService.updateRecord(this.processing.id, {
+            status: 'processing',
+            progress: 0
+        });
+
         // 更新队列中其他任务的位置
         this.queue.forEach((task, index) => {
             task.position = index + 1;
@@ -78,6 +94,15 @@ class TaskQueue {
                 this.processing.status = 'completed';
                 this.processing.result = result;
                 this.processing.completedAt = new Date();
+                
+                // 更新历史记录
+                historyService.updateRecord(this.processing.id, {
+                    status: 'completed',
+                    progress: 100,
+                    title: result.podcastTitle || '',
+                    savedFiles: result.savedFiles || []
+                });
+                
                 console.log(`✅ 任务完成: ${this.processing.id}`);
             }
         } catch (error) {
@@ -85,6 +110,12 @@ class TaskQueue {
             this.processing.status = 'failed';
             this.processing.error = error.message;
             this.processing.failedAt = new Date();
+            
+            // 更新历史记录
+            historyService.updateRecord(this.processing.id, {
+                status: 'failed',
+                error: error.message
+            });
         }
 
         // 移动到已完成列表
@@ -110,6 +141,13 @@ class TaskQueue {
             this.processing.progress = progress;
             this.processing.stage = stage;
             this.processing.stageText = stageText;
+            
+            // 同步更新历史记录（但不要太频繁保存文件）
+            historyService.updateRecord(taskId, {
+                progress,
+                stage,
+                stageText
+            });
         }
     }
 
