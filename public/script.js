@@ -35,7 +35,16 @@ const translations = {
         minutes: "分钟",
         almostDone: "即将完成...",
         langFlag: "🇨🇳",
-        langText: "中文"
+        langText: "中文",
+        batchMode: "批量模式",
+        singleMode: "单个模式",
+        queueTitle: "任务队列",
+        processing: "正在处理",
+        queued: "排队中",
+        completed: "已完成",
+        failed: "失败",
+        cancelled: "已取消",
+        position: "位置"
     },
     en: {
         title: "Podcast Transcriber",
@@ -72,9 +81,22 @@ const translations = {
         minutes: "minutes remaining",
         almostDone: "Almost done...",
         langFlag: "🇺🇸",
-        langText: "English"
+        langText: "English",
+        batchMode: "Batch Mode",
+        singleMode: "Single Mode",
+        queueTitle: "Task Queue",
+        processing: "Processing",
+        queued: "Queued",
+        completed: "Completed",
+        failed: "Failed",
+        cancelled: "Cancelled",
+        position: "Position"
     }
 };
+
+// 批量模式状态
+let isBatchMode = false;
+let queueEventSource = null;
 
 // 检测浏览器语言设置
 function detectBrowserLanguage() {
@@ -163,13 +185,347 @@ function updateUI() {
         updateDownloadButtonsLanguage();
     }
     
+    // 更新批量模式按钮文字
+    const batchModeToggle = document.getElementById('batchModeToggle');
+    if (batchModeToggle) {
+        batchModeToggle.textContent = isBatchMode ? texts.singleMode : texts.batchMode;
+    }
 
+}
+
+// ========================================
+// 批量处理功能
+// ========================================
+
+// 切换批量模式
+function toggleBatchMode() {
+    isBatchMode = !isBatchMode;
+    
+    const singleInput = document.getElementById('singleUrlInput');
+    const batchInput = document.getElementById('batchUrlInput');
+    const batchToggle = document.getElementById('batchModeToggle');
+    const podcastUrl = document.getElementById('podcastUrl');
+    const texts = translations[currentLang];
+    
+    if (isBatchMode) {
+        singleInput.classList.add('hidden');
+        batchInput.classList.remove('hidden');
+        batchToggle.textContent = texts.singleMode || '单个模式';
+        podcastUrl.removeAttribute('required');
+    } else {
+        singleInput.classList.remove('hidden');
+        batchInput.classList.add('hidden');
+        batchToggle.textContent = texts.batchMode || '批量模式';
+        podcastUrl.setAttribute('required', '');
+    }
+}
+
+// 提交批量任务
+async function submitBatchTasks(urls) {
+    const audioLanguage = document.getElementById('audioLanguage').value;
+    const outputLanguage = document.getElementById('outputLanguage').value;
+    
+    try {
+        const response = await fetch('/api/queue/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                urls,
+                operation: 'transcribe_only',
+                audioLanguage,
+                outputLanguage
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log(`✅ 已添加 ${result.tasks.length} 个任务到队列`);
+            showQueueSection();
+            subscribeToQueue();
+            // 清空输入
+            document.getElementById('batchUrls').value = '';
+        } else {
+            alert(result.error || '添加任务失败');
+        }
+        
+        return result;
+    } catch (error) {
+        console.error('批量提交失败:', error);
+        alert('批量提交失败: ' + error.message);
+    }
+}
+
+// 显示队列区域
+function showQueueSection() {
+    document.getElementById('queueSection').classList.remove('hidden');
+}
+
+// 隐藏队列区域
+function hideQueueSection() {
+    document.getElementById('queueSection').classList.add('hidden');
+}
+
+// 刷新队列状态
+async function refreshQueueStatus() {
+    try {
+        const response = await fetch('/api/queue/status');
+        const result = await response.json();
+        
+        if (result.success) {
+            updateQueueUI(result);
+        }
+    } catch (error) {
+        console.error('获取队列状态失败:', error);
+    }
+}
+
+// 订阅队列更新（SSE）
+function subscribeToQueue() {
+    if (queueEventSource) {
+        queueEventSource.close();
+    }
+    
+    queueEventSource = new EventSource('/api/queue/subscribe');
+    
+    queueEventSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'status') {
+                updateQueueUI(data);
+            }
+        } catch (error) {
+            console.error('解析队列状态失败:', error);
+        }
+    };
+    
+    queueEventSource.onerror = () => {
+        console.log('队列 SSE 连接断开，5秒后重连...');
+        setTimeout(subscribeToQueue, 5000);
+    };
+}
+
+// 更新队列 UI
+function updateQueueUI(status) {
+    const texts = translations[currentLang];
+    const currentTaskDiv = document.getElementById('currentTask');
+    const queueList = document.getElementById('queueList');
+    const emptyQueue = document.getElementById('emptyQueue');
+    const completedSection = document.getElementById('completedSection');
+    const completedList = document.getElementById('completedList');
+    
+    // 更新当前处理的任务
+    if (status.processing) {
+        currentTaskDiv.classList.remove('hidden');
+        document.getElementById('currentTaskUrl').textContent = truncateUrl(status.processing.url);
+        document.getElementById('currentTaskProgress').textContent = `${status.processing.progress || 0}%`;
+        document.getElementById('currentTaskProgressBar').style.width = `${status.processing.progress || 0}%`;
+        document.getElementById('currentTaskStage').textContent = status.processing.stageText || '';
+    } else {
+        currentTaskDiv.classList.add('hidden');
+    }
+    
+    // 更新队列列表
+    queueList.innerHTML = '';
+    
+    if (status.queue && status.queue.length > 0) {
+        emptyQueue.classList.add('hidden');
+        
+        status.queue.forEach(task => {
+            const item = document.createElement('div');
+            item.className = 'flex items-center justify-between bg-slate-50 rounded-lg p-3';
+            item.innerHTML = `
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm text-slate-600 truncate">${truncateUrl(task.url)}</p>
+                    <p class="text-xs text-slate-400">${texts.position}: ${task.position}</p>
+                </div>
+                <button onclick="cancelTask('${task.id}')" class="ml-2 text-xs text-red-500 hover:text-red-700">
+                    取消
+                </button>
+            `;
+            queueList.appendChild(item);
+        });
+    } else if (!status.processing) {
+        emptyQueue.classList.remove('hidden');
+    }
+    
+    // 更新已完成列表
+    if (status.recentCompleted && status.recentCompleted.length > 0) {
+        completedSection.classList.remove('hidden');
+        completedList.innerHTML = '';
+        
+        status.recentCompleted.slice(0, 5).forEach(task => {
+            const item = document.createElement('div');
+            const statusClass = task.status === 'completed' ? 'text-green-600' : 'text-red-600';
+            const statusIcon = task.status === 'completed' ? '✅' : '❌';
+            
+            item.className = 'flex items-center justify-between text-sm py-1';
+            item.innerHTML = `
+                <span class="truncate flex-1 text-slate-500">${truncateUrl(task.url)}</span>
+                <span class="${statusClass}">${statusIcon}</span>
+            `;
+            completedList.appendChild(item);
+        });
+    } else {
+        completedSection.classList.add('hidden');
+    }
+    
+    // 如果队列全空且没有处理中的任务，隐藏队列区域
+    if (!status.processing && (!status.queue || status.queue.length === 0)) {
+        // 保持显示，让用户可以看到已完成的任务
+    }
+}
+
+// 截断 URL 显示
+function truncateUrl(url, maxLength = 50) {
+    if (!url) return '';
+    if (url.length <= maxLength) return url;
+    return url.substring(0, maxLength - 3) + '...';
+}
+
+// 取消任务
+async function cancelTask(taskId) {
+    try {
+        const response = await fetch(`/api/queue/task/${taskId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            refreshQueueStatus();
+        } else {
+            alert(result.message || '取消失败');
+        }
+    } catch (error) {
+        console.error('取消任务失败:', error);
+    }
+}
+
+// 清空队列
+async function clearQueue() {
+    if (!confirm('确定要清空所有排队中的任务吗？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/queue/all', {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            refreshQueueStatus();
+        }
+    } catch (error) {
+        console.error('清空队列失败:', error);
+    }
+}
+
+// 批量导出所有文件
+async function downloadAllFiles() {
+    try {
+        const response = await fetch('/api/temp-files');
+        const result = await response.json();
+        
+        if (!result.success || !result.files || result.files.length === 0) {
+            alert('没有可导出的文件');
+            return;
+        }
+        
+        // 过滤出转录和总结文件
+        const transcriptFiles = result.files.filter(f => 
+            f.filename.includes('_transcript') || f.filename.includes('_summary')
+        );
+        
+        if (transcriptFiles.length === 0) {
+            alert('没有可导出的转录文件');
+            return;
+        }
+        
+        console.log(`📦 批量导出 ${transcriptFiles.length} 个文件`);
+        
+        // 直接下载 ZIP
+        window.location.href = '/api/download-all';
+        
+    } catch (error) {
+        console.error('批量导出失败:', error);
+        alert('批量导出失败: ' + error.message);
+    }
+}
+
+// 导出选中的文件
+async function downloadSelectedFiles(filenames) {
+    if (!filenames || filenames.length === 0) {
+        alert('请选择要导出的文件');
+        return;
+    }
+    
+    try {
+        // 创建一个隐藏的表单来提交 POST 请求并触发下载
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/api/download-selected';
+        form.style.display = 'none';
+        
+        // 使用 fetch 来处理
+        const response = await fetch('/api/download-selected', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filenames })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '导出失败');
+        }
+        
+        // 获取文件名
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'podcast_selected.zip';
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename="(.+)"/);
+            if (match) filename = match[1];
+        }
+        
+        // 下载文件
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+    } catch (error) {
+        console.error('导出失败:', error);
+        alert('导出失败: ' + error.message);
+    }
 }
 
 // 表单提交处理
 async function processPodcast(event) {
     event.preventDefault();
     
+    // 检查是否是批量模式
+    if (isBatchMode) {
+        const batchUrls = document.getElementById('batchUrls').value;
+        const urls = batchUrls.split('\n')
+            .map(url => url.trim())
+            .filter(url => url.length > 0);
+        
+        if (urls.length === 0) {
+            alert('请输入至少一个链接');
+            return;
+        }
+        
+        console.log(`📥 批量提交 ${urls.length} 个链接`);
+        await submitBatchTasks(urls);
+        return;
+    }
+    
+    // 单链接模式 - 原有逻辑
     const form = event.target;
     const formData = new FormData(form);
     

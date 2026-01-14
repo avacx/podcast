@@ -291,14 +291,32 @@
                     <label class="flex items-center text-sm font-medium text-slate-700 mb-3">
                         <span class="text-lg mr-2">🔗</span>
                         <span id="urlLabel">Podcast音频链接</span>
+                        <button type="button" id="batchModeToggle" onclick="toggleBatchMode()" class="ml-auto text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 transition-colors">
+                            批量模式
+                        </button>
                     </label>
-                    <input 
-                        type="url" 
-                        id="podcastUrl" 
-                        placeholder="https://example.com/podcast/episode"
-                        class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-slate-700"
-                        required
-                    >
+                    
+                    <!-- 单链接输入 -->
+                    <div id="singleUrlInput">
+                        <input 
+                            type="url" 
+                            id="podcastUrl" 
+                            placeholder="https://example.com/podcast/episode"
+                            class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-slate-700"
+                            required
+                        >
+                    </div>
+                    
+                    <!-- 批量链接输入 -->
+                    <div id="batchUrlInput" class="hidden">
+                        <textarea 
+                            id="batchUrls" 
+                            placeholder="每行输入一个链接，例如：&#10;https://example.com/podcast/episode1&#10;https://example.com/podcast/episode2&#10;https://example.com/podcast/episode3"
+                            class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-slate-700 h-32 resize-y"
+                        ></textarea>
+                        <p class="text-xs text-slate-500 mt-1">每行一个链接，将按顺序依次处理（避免显存溢出）</p>
+                    </div>
+                    
                     <p class="text-xs text-slate-500 mt-2" id="urlHelper">
                         支持 Apple Podcasts、小宇宙、RSS订阅源和直接音频链接
                     </p>
@@ -364,6 +382,62 @@
                     <span id="submitText">🚀 开始处理</span>
                 </button>
             </form>
+        </div>
+
+        <!-- Queue Status Section -->
+        <div id="queueSection" class="hidden mb-8">
+            <div class="glass rounded-2xl shadow-xl border border-white/20 p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-slate-700 flex items-center">
+                        <span class="mr-2">📋</span>
+                        <span id="queueTitle">任务队列</span>
+                    </h3>
+                    <div class="flex gap-2">
+                        <button onclick="downloadAllFiles()" class="text-xs bg-green-100 text-green-600 px-3 py-1 rounded hover:bg-green-200 transition-colors">
+                            📦 批量导出
+                        </button>
+                        <button onclick="refreshQueueStatus()" class="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded hover:bg-slate-200 transition-colors">
+                            刷新
+                        </button>
+                        <button onclick="clearQueue()" class="text-xs bg-red-100 text-red-600 px-3 py-1 rounded hover:bg-red-200 transition-colors">
+                            清空队列
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 当前处理中的任务 -->
+                <div id="currentTask" class="hidden mb-4">
+                    <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm font-medium text-blue-700">正在处理</span>
+                            <span id="currentTaskProgress" class="text-sm text-blue-600">0%</span>
+                        </div>
+                        <p id="currentTaskUrl" class="text-sm text-slate-600 truncate mb-2"></p>
+                        <div class="w-full bg-blue-200 rounded-full h-2">
+                            <div id="currentTaskProgressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p id="currentTaskStage" class="text-xs text-blue-500 mt-1"></p>
+                    </div>
+                </div>
+                
+                <!-- 队列列表 -->
+                <div id="queueList" class="space-y-2">
+                    <!-- 队列项目将由 JS 动态添加 -->
+                </div>
+                
+                <!-- 空队列提示 -->
+                <div id="emptyQueue" class="hidden text-center py-4 text-slate-400 text-sm">
+                    队列为空
+                </div>
+                
+                <!-- 最近完成的任务 -->
+                <div id="completedSection" class="hidden mt-4 pt-4 border-t border-slate-200">
+                    <h4 class="text-sm font-medium text-slate-500 mb-2">最近完成</h4>
+                    <div id="completedList" class="space-y-2">
+                        <!-- 已完成项目将由 JS 动态添加 -->
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Results Section -->

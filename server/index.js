@@ -11,6 +11,7 @@ const { downloadPodcastAudio } = require('./services/podcastService');
 const { getAudioFiles, estimateAudioDuration } = require('./services/audioInfoService');
 const { cleanupAudioFiles } = require('./utils/fileSaver');
 const { formatSizeKB, formatSizeMB, estimateAudioDurationFromSize } = require('./utils/formatUtils');
+const { taskQueue } = require('./services/queueService');
 
 const app = express();
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
@@ -357,6 +358,153 @@ app.get('/api/download/:filename', (req, res) => {
     }
 });
 
+// 批量导出 - 打包所有转录文件为 ZIP
+app.get('/api/download-all', async (req, res) => {
+    try {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        // 获取所有转录和总结文件
+        const files = fs.readdirSync(tempDir).filter(file => 
+            file.endsWith('_transcript.md') || 
+            file.endsWith('_summary.md') ||
+            file.endsWith('_transcript.txt') ||
+            file.endsWith('_summary.txt')
+        );
+        
+        if (files.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: '没有可导出的文件'
+            });
+        }
+        
+        console.log(`📦 批量导出 ${files.length} 个文件`);
+        
+        // 创建 ZIP 文件名
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const zipFileName = `podcast_transcripts_${timestamp}.zip`;
+        const zipFilePath = path.join(tempDir, zipFileName);
+        
+        // 删除可能存在的旧 ZIP 文件
+        if (fs.existsSync(zipFilePath)) {
+            fs.unlinkSync(zipFilePath);
+        }
+        
+        // 使用系统 zip 命令打包文件
+        const fileList = files.map(f => `"${f}"`).join(' ');
+        await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" ${fileList}`);
+        
+        // 检查 ZIP 是否创建成功
+        if (!fs.existsSync(zipFilePath)) {
+            throw new Error('ZIP 文件创建失败');
+        }
+        
+        const zipStats = fs.statSync(zipFilePath);
+        console.log(`✅ ZIP 文件创建成功: ${zipFileName} (${(zipStats.size/1024).toFixed(1)}KB)`);
+        
+        // 设置响应头
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipFileName}"`);
+        res.setHeader('Content-Length', zipStats.size);
+        
+        // 发送文件并在完成后删除
+        const fileStream = fs.createReadStream(zipFilePath);
+        fileStream.pipe(res);
+        
+        fileStream.on('end', () => {
+            // 删除临时 ZIP 文件
+            try {
+                fs.unlinkSync(zipFilePath);
+                console.log(`🗑️ 已清理临时 ZIP 文件`);
+            } catch (e) {
+                console.warn('清理 ZIP 文件失败:', e.message);
+            }
+        });
+        
+    } catch (error) {
+        console.error('批量导出失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '批量导出失败: ' + error.message
+        });
+    }
+});
+
+// 批量导出指定任务的文件
+app.post('/api/download-selected', async (req, res) => {
+    try {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        const { filenames } = req.body;
+        
+        if (!filenames || !Array.isArray(filenames) || filenames.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: '请提供要导出的文件列表'
+            });
+        }
+        
+        // 验证文件存在
+        const validFiles = filenames.filter(filename => {
+            const filePath = path.join(tempDir, filename);
+            return filePath.startsWith(tempDir) && fs.existsSync(filePath);
+        });
+        
+        if (validFiles.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: '没有找到有效的文件'
+            });
+        }
+        
+        console.log(`📦 导出选中的 ${validFiles.length} 个文件`);
+        
+        // 创建 ZIP 文件
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const zipFileName = `podcast_selected_${timestamp}.zip`;
+        const zipFilePath = path.join(tempDir, zipFileName);
+        
+        if (fs.existsSync(zipFilePath)) {
+            fs.unlinkSync(zipFilePath);
+        }
+        
+        const fileList = validFiles.map(f => `"${f}"`).join(' ');
+        await execAsync(`cd "${tempDir}" && zip -j "${zipFileName}" ${fileList}`);
+        
+        if (!fs.existsSync(zipFilePath)) {
+            throw new Error('ZIP 文件创建失败');
+        }
+        
+        const zipStats = fs.statSync(zipFilePath);
+        
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipFileName}"`);
+        res.setHeader('Content-Length', zipStats.size);
+        
+        const fileStream = fs.createReadStream(zipFilePath);
+        fileStream.pipe(res);
+        
+        fileStream.on('end', () => {
+            try {
+                fs.unlinkSync(zipFilePath);
+            } catch (e) {
+                console.warn('清理 ZIP 文件失败:', e.message);
+            }
+        });
+        
+    } catch (error) {
+        console.error('批量导出失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '批量导出失败: ' + error.message
+        });
+    }
+});
+
 // 健康检查端点
 app.get('/api/health', (req, res) => {
     res.json({
@@ -415,6 +563,214 @@ app.post('/api/estimate-duration', async (req, res) => {
         });
     }
 });
+
+// ========================================
+// 批量处理 API - 任务队列系统
+// ========================================
+
+// 批量添加任务到队列
+app.post('/api/queue/batch', async (req, res) => {
+    try {
+        const { urls, operation = 'transcribe_only', audioLanguage = 'auto', outputLanguage = 'zh' } = req.body;
+        
+        if (!urls || !Array.isArray(urls) || urls.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: '请提供有效的链接数组'
+            });
+        }
+
+        // 过滤空链接
+        const validUrls = urls.filter(url => url && url.trim());
+        
+        if (validUrls.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: '没有有效的链接'
+            });
+        }
+
+        console.log(`📥 批量添加 ${validUrls.length} 个任务到队列`);
+
+        // 为每个URL创建任务
+        const tasks = validUrls.map(url => ({
+            url: url.trim(),
+            operation,
+            audioLanguage,
+            outputLanguage,
+            processor: createTaskProcessor(operation, audioLanguage, outputLanguage)
+        }));
+
+        // 添加到队列
+        const queuedTasks = taskQueue.addBatchTasks(tasks);
+
+        res.json({
+            success: true,
+            message: `已添加 ${queuedTasks.length} 个任务到队列`,
+            tasks: queuedTasks.map(t => ({
+                id: t.id,
+                url: t.url,
+                position: t.position,
+                status: t.status
+            })),
+            queueStatus: taskQueue.getStatus()
+        });
+
+    } catch (error) {
+        console.error('批量添加任务失败:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message || '批量添加任务失败'
+        });
+    }
+});
+
+// 获取队列状态
+app.get('/api/queue/status', (req, res) => {
+    res.json({
+        success: true,
+        ...taskQueue.getStatus()
+    });
+});
+
+// 获取单个任务详情
+app.get('/api/queue/task/:taskId', (req, res) => {
+    const task = taskQueue.getTask(req.params.taskId);
+    
+    if (!task) {
+        return res.status(404).json({
+            success: false,
+            error: '任务未找到'
+        });
+    }
+
+    res.json({
+        success: true,
+        task: {
+            id: task.id,
+            url: task.url,
+            status: task.status,
+            progress: task.progress,
+            stage: task.stage,
+            stageText: task.stageText,
+            position: task.position,
+            queuedAt: task.queuedAt,
+            startedAt: task.startedAt,
+            completedAt: task.completedAt,
+            error: task.error,
+            result: task.status === 'completed' ? {
+                savedFiles: task.result?.savedFiles,
+                podcastTitle: task.result?.podcastTitle
+            } : undefined
+        }
+    });
+});
+
+// 取消队列中的任务
+app.delete('/api/queue/task/:taskId', (req, res) => {
+    const cancelled = taskQueue.cancelTask(req.params.taskId);
+    
+    res.json({
+        success: cancelled,
+        message: cancelled ? '任务已取消' : '无法取消该任务（可能正在处理或已完成）'
+    });
+});
+
+// 清空队列
+app.delete('/api/queue/all', (req, res) => {
+    const count = taskQueue.clearQueue();
+    
+    res.json({
+        success: true,
+        message: `已取消 ${count} 个排队中的任务`
+    });
+});
+
+// SSE 端点：订阅队列状态更新
+app.get('/api/queue/subscribe', (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*'
+    });
+
+    // 发送初始状态
+    res.write(`data: ${JSON.stringify({ type: 'status', ...taskQueue.getStatus() })}\n\n`);
+
+    // 定期发送状态更新
+    const intervalId = setInterval(() => {
+        res.write(`data: ${JSON.stringify({ type: 'status', ...taskQueue.getStatus() })}\n\n`);
+    }, 2000);
+
+    // 客户端断开时清理
+    req.on('close', () => {
+        clearInterval(intervalId);
+    });
+});
+
+/**
+ * 创建任务处理器
+ */
+function createTaskProcessor(operation, audioLanguage, outputLanguage) {
+    return async (task, progressCallback) => {
+        const sessionId = task.id;
+        
+        console.log(`🎯 处理任务: ${task.url}`);
+        
+        // 步骤1: 下载音频
+        progressCallback(10, 'download', '下载音频');
+        const podcastInfo = await downloadPodcastAudio(task.url);
+        
+        if (!podcastInfo || !podcastInfo.audioFilePath) {
+            throw new Error('无法下载音频文件');
+        }
+
+        const originalAudioPath = podcastInfo.audioFilePath;
+        const podcastTitle = podcastInfo.title || 'Untitled Podcast';
+
+        // 步骤2: 估算时长
+        progressCallback(20, 'analyze', '分析音频');
+        const estimatedDuration = await estimateAudioDuration(originalAudioPath);
+
+        // 步骤3: 获取音频文件信息
+        const audioFiles = await getAudioFiles(originalAudioPath);
+        const shouldSummarize = operation === 'transcribe_summarize';
+
+        // 步骤4: 转录处理
+        progressCallback(30, 'transcription', '转录中');
+        
+        const sendLogCallback = (message) => {
+            console.log(`[${task.id}] ${message}`);
+        };
+        
+        const result = await processAudioWithOpenAI(
+            audioFiles, 
+            shouldSummarize, 
+            outputLanguage, 
+            tempDir, 
+            audioLanguage, 
+            task.url, 
+            sessionId, 
+            progressCallback,
+            podcastTitle, 
+            sendLogCallback
+        );
+
+        // 步骤5: 清理
+        progressCallback(95, 'cleanup', '清理临时文件');
+        cleanupAudioFiles(originalAudioPath, audioFiles);
+
+        progressCallback(100, 'complete', '完成');
+
+        return {
+            ...result,
+            podcastTitle,
+            estimatedDuration,
+            actualDuration: result.audioDuration || result.duration
+        };
+    };
+}
 
 // 错误处理中间件
 app.use((error, req, res, next) => {
